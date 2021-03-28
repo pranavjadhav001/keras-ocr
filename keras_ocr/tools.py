@@ -50,6 +50,65 @@ def get_rotated_width_height(box):
          spatial.distance.cdist(box[1][np.newaxis], box[2][np.newaxis], "euclidean")) / 2
     return int(w[0][0]), int(h[0][0])
 
+def warpChars(image,result,
+            box,
+            target_height=None,
+            target_width=None,
+            margin=0,
+            cval=None,
+            return_transform=False,
+            skip_rotate=False):
+    """Warp a boxed region in an image given by a set of four points into
+    a rectangle with a specified width and height. Useful for taking crops
+    of distorted or rotated text.
+
+    Args:
+        image: The image from which to take the box
+        box: A list of four points starting in the top left
+            corner and moving clockwise.
+        target_height: The height of the output rectangle
+        target_width: The width of the output rectangle
+        return_transform: Whether to return the transformation
+            matrix with the image.
+    """
+    coors = []
+    chars = []
+    if cval is None:
+        cval = (0, 0, 0) if len(result.shape) == 3 else 0
+    if not skip_rotate:
+        box, _ = tools.get_rotated_box(box)
+    w, h = tools.get_rotated_width_height(box)
+    assert (
+        (target_width is None and target_height is None)
+        or (target_width is not None and target_height is not None)), \
+            'Either both or neither of target width and height must be provided.'
+    if target_width is None and target_height is None:
+        target_width = w
+        target_height = h
+    scale = min(target_width / w, target_height / h)
+    M = cv2.getPerspectiveTransform(src=box,
+                                    dst=np.array([[margin, margin], [scale * w - margin, margin],
+                                                  [scale * w - margin, scale * h - margin],
+                                                  [margin, scale * h - margin]]).astype('float32'))
+    crop_mask = cv2.warpPerspective(result, M, dsize=(int(scale * w), int(scale * h)))
+    crop_img = cv2.warpPerspective(image, M, dsize=(int(scale * w), int(scale * h)))
+    target_shape = (target_height, target_width, 3) if len(result.shape) == 3 else (target_height,
+                                                                                   target_width)
+    full = (np.zeros(target_shape) + cval).astype('uint8')
+    full[:crop_mask.shape[0], :crop_mask.shape[1]] = crop_mask
+    _, text_score = cv2.threshold(full,
+                                 thresh=100,
+                                maxval=255,
+                                type=cv2.THRESH_BINARY)
+    contours, hierarchy = cv2.findContours(text_score,cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_NONE)
+    for contour in contours:
+        x,y,w,h = cv2.boundingRect(contour)
+        coors.append([[x,y],[x+w,y],[x+w,y+h],[x,y+h]])
+        chars.append(crop_img[y:y+h,x:x+w])
+    coors= np.array(coors).astype(np.float32)
+    inv_trans = np.linalg.pinv(M)
+    transformed_points = cv2.perspectiveTransform(coors,inv_trans)
+    return chars,transformed_points
 
 # pylint:disable=too-many-locals
 def warpBox(image,

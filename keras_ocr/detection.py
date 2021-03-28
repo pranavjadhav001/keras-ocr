@@ -21,15 +21,15 @@ import typing
 # LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 # THE SOFTWARE.
-
+import matplotlib.pyplot as plt
 import cv2
 import numpy as np
 import tensorflow as tf
-import efficientnet.tfkeras as efficientnet
+#import efficientnet.tfkeras as efficientnet
 from tensorflow import keras
 
-from . import tools
-
+#from . import tools
+import tools
 
 def compute_input(image):
     # should be RGB order
@@ -172,7 +172,6 @@ def getBoxes(y_pred,
         textmap = y_pred_cur[..., 0].copy()
         linkmap = y_pred_cur[..., 1].copy()
         img_h, img_w = textmap.shape
-
         _, text_score = cv2.threshold(textmap,
                                       thresh=text_threshold,
                                       maxval=1,
@@ -182,8 +181,7 @@ def getBoxes(y_pred,
                                       maxval=1,
                                       type=cv2.THRESH_BINARY)
         n_components, labels, stats, _ = cv2.connectedComponentsWithStats(np.clip(
-            text_score + link_score, 0, 1).astype('uint8'),
-                                                                          connectivity=4)
+            text_score + link_score, 0, 1).astype('uint8'),connectivity=4)
         boxes = []
         for component_id in range(1, n_components):
             # Filter by size
@@ -213,7 +211,6 @@ def getBoxes(y_pred,
             segmap[sy:ey, sx:ex] = cv2.dilate(
                 segmap[sy:ey, sx:ex],
                 cv2.getStructuringElement(cv2.MORPH_RECT, (1 + niter, 1 + niter)))
-
             # Make rotated box from contour
             contours = cv2.findContours(segmap.astype('uint8'),
                                         mode=cv2.RETR_TREE,
@@ -249,8 +246,7 @@ class UpsampleLike(keras.layers.Layer):
         else:
             # pylint: disable=no-member
             return tf.compat.v1.image.resize_bilinear(source,
-                                                      size=(target_shape[1], target_shape[2]),
-                                                      half_pixel_centers=True)
+                                                      size=(target_shape[1], target_shape[2]))
 
     def compute_output_shape(self, input_shape):
         if keras.backend.image_data_format() == 'channels_first':
@@ -679,9 +675,10 @@ class Detector:
             size_threshold: The minimum area for a word.
         """
         images = [compute_input(tools.read(image)) for image in images]
-        boxes = getBoxes(self.model.predict(np.array(images), **kwargs),
+        result = self.model.predict(np.array(images), **kwargs)
+        boxes = getBoxes(result,
                          detection_threshold=detection_threshold,
                          text_threshold=text_threshold,
                          link_threshold=link_threshold,
                          size_threshold=size_threshold)
-        return boxes
+        return result,boxes

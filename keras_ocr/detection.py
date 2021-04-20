@@ -1,4 +1,5 @@
-# pylint: disable=invalid-name,too-many-locals,line-too-long,no-else-raise,too-many-arguments,no-self-use,too-many-statements,stop-iteration-return,import-outside-toplevel
+# pylint: disable=invalid-name,missing-class-docstring,no-member,missing-function-docstring.c-extension-no-member,too-many-locals,line-too-long,no-else-raise,too-many-arguments,no-self-use,too-many-statements,stop-iteration-return,import-outside-toplevel
+'''script for detecting chars and extracting words'''
 import typing
 
 # The PyTorch portions of this code are subject to the following copyright notice.
@@ -21,13 +22,11 @@ import typing
 # LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 # THE SOFTWARE.
-import matplotlib.pyplot as plt
 import cv2
 import numpy as np
 import tensorflow as tf
 #import efficientnet.tfkeras as efficientnet
 from tensorflow import keras
-
 #from . import tools
 import tools
 
@@ -652,7 +651,6 @@ class Detector:
                size_threshold=10,
                **kwargs):
         """Recognize the text in a set of images.
-
         Args:
             images: Can be a list of numpy arrays of shape HxWx3 or a list of
                 filepaths.
@@ -675,10 +673,63 @@ class Detector:
             size_threshold: The minimum area for a word.
         """
         images = [compute_input(tools.read(image)) for image in images]
-        result = self.model.predict(np.array(images), **kwargs)
-        boxes = getBoxes(result,
+        boxes = getBoxes(self.model.predict(np.array(images), **kwargs),
                          detection_threshold=detection_threshold,
                          text_threshold=text_threshold,
                          link_threshold=link_threshold,
                          size_threshold=size_threshold)
-        return result,boxes
+        return boxes
+
+    def detectChars(self,
+               images: typing.List[typing.Union[np.ndarray, str]],
+               detection_threshold=0.7,
+               thickness=3,
+               text_threshold=0.4,
+               link_threshold=0.4,
+               size_threshold=10,tolerance=0.1,
+               **kwargs):
+        """Recognize the Chars in a set of images.
+
+        Args:
+            images: Can be a list of numpy arrays of shape HxWx3 or a list of
+                filepaths.
+            link_threshold: This is the same as `text_threshold`, but is applied to the
+                link map instead of the text map.
+            detection_threshold: We want to avoid including boxes that may have
+                represented large regions of low confidence text predictions. To do this,
+                we do a final check for each word box to make sure the maximum confidence
+                value exceeds some detection threshold. This is the threshold used for
+                this check.
+            text_threshold: When the text map is processed, it is converted from confidence
+                (float from zero to one) values to classification (0 for not text, 1 for
+                text) using binary thresholding. The threshold value determines the
+                breakpoint at which a value is converted to a 1 or a 0. For example, if
+                the threshold is 0.4 and a value for particular point on the text map is
+                0.5, that value gets converted to a 1. The higher this value is, the less
+                likely it is that characters will be merged together into a single word.
+                The lower this value is, the more likely it is that non-text will be detected.
+                Therein lies the balance.
+            size_threshold: The minimum area for a word.
+        """
+        original_images = [(tools.read(image)) for image in images]
+        images = [compute_input(image) for image in original_images]
+        results = self.model.predict(np.array(images), **kwargs)
+        boxes = getBoxes(results,
+                         detection_threshold=detection_threshold,
+                         text_threshold=text_threshold,
+                         link_threshold=link_threshold,
+                         size_threshold=size_threshold)
+        resized_results = [(cv2.resize(i[..., 0],(images[cnt].shape[1], \
+            images[cnt].shape[0]))*255).astype(np.uint8) for cnt,i in enumerate(results)]
+        all_transformed_chars, all_images = [],[]
+        for image, resized_result, box in zip(original_images, resized_results, boxes):
+            transformed_chars, transformed_coors = [],[]
+            for words in box:
+                transformed_char,transformed_coor = tools.warpChars(image, resized_result, words, tolerance)
+                transformed_coors.extend(transformed_coor)
+                transformed_chars.extend(transformed_char)
+            transformed_coors = np.array(transformed_coors).astype(np.int32)
+            new_img = tools.drawBoxes(image, transformed_coors, thickness=thickness)
+            all_images.append(new_img)
+            all_transformed_chars.append(transformed_chars)
+        return all_images, all_transformed_chars, transformed_coors

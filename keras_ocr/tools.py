@@ -1,4 +1,4 @@
-# pylint: disable=invalid-name,too-many-branches,too-many-statements,too-many-arguments
+# pylint: disable=invalid-name,missing-module-docstring,missing-function-docstring,c-extension-no-member,too-many-branches,too-many-statements,too-many-arguments
 import os
 import io
 import typing
@@ -52,6 +52,8 @@ def get_rotated_width_height(box):
 
 def warpChars(image,result,
             box,
+            tolerance=0.1,
+            text_threshold=100,
             target_height=None,
             target_width=None,
             margin=0,
@@ -76,8 +78,8 @@ def warpChars(image,result,
     if cval is None:
         cval = (0, 0, 0) if len(result.shape) == 3 else 0
     if not skip_rotate:
-        box, _ = tools.get_rotated_box(box)
-    w, h = tools.get_rotated_width_height(box)
+        box, _ = get_rotated_box(box)
+    w, h = get_rotated_width_height(box)
     assert (
         (target_width is None and target_height is None)
         or (target_width is not None and target_height is not None)), \
@@ -97,18 +99,21 @@ def warpChars(image,result,
     full = (np.zeros(target_shape) + cval).astype('uint8')
     full[:crop_mask.shape[0], :crop_mask.shape[1]] = crop_mask
     _, text_score = cv2.threshold(full,
-                                 thresh=100,
+                                thresh=text_threshold,
                                 maxval=255,
                                 type=cv2.THRESH_BINARY)
     contours, hierarchy = cv2.findContours(text_score,cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_NONE)
     for contour in contours:
         x,y,w,h = cv2.boundingRect(contour)
-        coors.append([[x,y],[x+w,y],[x+w,y+h],[x,y+h]])
-        chars.append(crop_img[y:y+h,x:x+w])
+        new_x,new_y,new_w,new_h = max(0,int(x-(w*tolerance))),max(0,int(y-(h*tolerance))), \
+        int(w+ 2*(w*tolerance)),int(h+ 2*(h*tolerance))
+        coors.append([[new_x, new_y], [new_x+new_w, new_y],\
+            [new_x+new_w, new_y+new_h], [new_x, new_y+new_h]])
+        chars.append(crop_img[new_y:new_y+new_h, new_x:new_x+new_w])
     coors= np.array(coors).astype(np.float32)
     inv_trans = np.linalg.pinv(M)
     transformed_points = cv2.perspectiveTransform(coors,inv_trans)
-    return chars,transformed_points
+    return chars, transformed_points
 
 # pylint:disable=too-many-locals
 def warpBox(image,
